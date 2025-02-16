@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/types.h>
+//Comments for worker
 
 struct PCB{
     int occupied; // either true or false
