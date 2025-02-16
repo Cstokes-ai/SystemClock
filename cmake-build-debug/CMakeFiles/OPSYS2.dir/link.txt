@@ -1,0 +1,1 @@
+/usr/bin/cc -g CMakeFiles/OPSYS2.dir/main.c.o CMakeFiles/OPSYS2.dir/oss.c.o -o OPSYS2 
