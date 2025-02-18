@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <sys/types.h>
 //Comments for worker
+// I think I will start on this file first
+
 
 struct PCB{
     int occupied; // either true or false
