@@ -126,15 +126,13 @@ void worker(int shmid, int duration) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 3) {
+    if (argc != 4) {
         usage();
     }
 
-    int maxTime = atoi(argv[1]);
-    int duration = atoi(argv[2]);
-
-    // Assuming shmid is obtained from some other means, for example:
-    int shmid = 1234; // Replace with actual shared memory ID
+    int shmid = atoi(argv[1]);
+    int maxTime = atoi(argv[2]);
+    int duration = atoi(argv[3]);
 
     worker(shmid, duration);
     return 0;
