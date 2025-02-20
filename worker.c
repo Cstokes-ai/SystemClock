@@ -9,7 +9,7 @@
 #include <sys/wait.h>
 #include <sys/shm.h>
 #include <sys/ipc.h>
-//Comments for worker
+#include <errno.h>
 // I think I will start on this file first
 
 /* Worker Process: Managing Child Processes
@@ -92,47 +92,59 @@ void worker(int shmid, int duration) {
     pcb = (struct PCB *) shmat(shmid, NULL, 0);
     if (pcb == (void *) -1) {
         perror("shmat");
+        fprintf(stderr, "Error attaching to shared memory. shmid: %d, errno: %d\n", shmid, errno);
         exit(1);
     }
 
-    int termTime = pcb->startSeconds + duration / 1000000000;
-    int termTimeNano = pcb->startNano + duration % 1000000000;
+    int startSeconds = pcb->startSeconds;
+    int startNano = pcb->startNano;
+    int termTime = startSeconds + duration / 1000000000;
+    int termTimeNano = startNano + duration % 1000000000;
     if (termTimeNano >= 1000000000) {
         termTime++;
         termTimeNano -= 1000000000;
     }
 
-    printf("WORKER PID: %d PPID: %d SysClockS: %d SysClockNano: %d TermTimeS: %d TermTimeNano: %d\n", getpid(), getppid(), pcb->startSeconds, pcb->startNano, termTime, termTimeNano);
+    printf("WORKER PID: %d PPID: %d SysClockS: %d SysClockNano: %d TermTimeS: %d TermTimeNano: %d\n",
+           getpid(), getppid(), startSeconds, startNano, termTime, termTimeNano);
     printf("--Just Starting\n");
 
+    int lastSecond = startSeconds;
     while (1) {
         if (pcb->startSeconds > termTime || (pcb->startSeconds == termTime && pcb->startNano > termTimeNano)) {
-            printf("WORKER PID: %d PPID: %d SysClockS: %d SysClockNano: %d TermTimeS: %d TermTimeNano: %d\n", getpid(), getppid(), pcb->startSeconds, pcb->startNano, termTime, termTimeNano);
+            printf("WORKER PID: %d PPID: %d SysClockS: %d SysClockNano: %d TermTimeS: %d TermTimeNano: %d\n",
+                   getpid(), getppid(), pcb->startSeconds, pcb->startNano, termTime, termTimeNano);
             printf("--Terminating\n");
             break;
         }
 
-        if (pcb->startNano >= 1000000000) {
-            pcb->startSeconds++;
-            pcb->startNano -= 1000000000;
+        if (pcb->startSeconds > lastSecond) {
+            printf("WORKER PID: %d PPID: %d SysClockS: %d SysClockNano: %d TermTimeS: %d TermTimeNano: %d\n",
+                   getpid(), getppid(), pcb->startSeconds, pcb->startNano, termTime, termTimeNano);
+            printf("--%d seconds have passed since starting\n", pcb->startSeconds - startSeconds);
+            lastSecond = pcb->startSeconds;
         }
-
-        printf("WORKER PID: %d PPID: %d SysClockS: %d SysClockNano: %d TermTimeS: %d TermTimeNano: %d\n", getpid(), getppid(), pcb->startSeconds, pcb->startNano, termTime, termTimeNano);
-        printf("--%d seconds have passed since starting\n", pcb->startSeconds - pcb->startSeconds);
-        pcb->startNano += 1000000;
     }
 
     shmdt(pcb);
 }
-
 int main(int argc, char *argv[]) {
-    if (argc != 4) {
+    if (argc != 3) {
         usage();
     }
 
     int shmid = atoi(argv[1]);
-    int maxTime = atoi(argv[2]);
-    int duration = atoi(argv[3]);
+    int duration = atoi(argv[2]);
+
+    if (shmid <= 0) {
+        fprintf(stderr, "Error: Invalid shared memory ID\n");
+        exit(1);
+    }
+
+    if (duration <= 0) {
+        fprintf(stderr, "Error: Invalid duration\n");
+        exit(1);
+    }
 
     worker(shmid, duration);
     return 0;
