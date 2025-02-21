@@ -52,13 +52,6 @@ Once its time has elapsed, it should output a final message before terminating:
     --Terminating
 */
 
-struct PCB{
-    int occupied; // either true or false
-    pid_t pid; // process id of this child
-    int startSeconds; // time when it was forked
-    int startNano; //time when it was forked
-
-};
 
 
 
@@ -78,56 +71,61 @@ WORKER PID:6577 PPID:6576 SysClockS: 11 SysclockNano: 700000 TermTimeS: 11 TermT
 --Terminating
 */
 
-void usage() {
-    fprintf(stderr, "Help: worker <maxTime> <duration>\n");
-    fprintf(stderr, " - maxTime: The maximum time the worker should stay active in the system.\n");
-    fprintf(stderr, " - duration: The duration to add to the system clock.\n");
-    exit(1);
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/shm.h>
+#include <sys/ipc.h>
+#include <errno.h>
 
+#define SHM_KEY 859047  // Must match oss.c
+
+struct SystemClock {
+    int seconds;
+    int nanoseconds;
+};
+
+void usage() {
+    fprintf(stderr, "Usage: worker <shmid> <duration>\n");
+    exit(1);
 }
-//lets handle pid, SysClocks,SysclockNano, TermTime, TermtimeNano
 
 void worker(int shmid, int duration) {
-    struct PCB *pcb;
-    pcb = (struct PCB *) shmat(shmid, NULL, 0);
-    if (pcb == (void *) -1) {
-        perror("shmat");
-        fprintf(stderr, "Error attaching to shared memory. shmid: %d, errno: %d\n", shmid, errno);
+    // Attach to shared memory
+    struct SystemClock *sysClock = (struct SystemClock *) shmat(shmid, NULL, 0);
+    if (sysClock == (void *) -1) {
+        perror("shmat failed");
+        fprintf(stderr, "Error: %s\n", strerror(errno));
         exit(1);
     }
 
-    int startSeconds = pcb->startSeconds;
-    int startNano = pcb->startNano;
-    int termTime = startSeconds + duration / 1000000000;
-    int termTimeNano = startNano + duration % 1000000000;
+    printf("WORKER PID: %d attached to shared memory ID: %d\n", getpid(), shmid);
+
+    int startSeconds = sysClock->seconds;
+    int startNano = sysClock->nanoseconds;
+
+    int termTimeS = startSeconds + (duration / 1000000000);
+    int termTimeNano = startNano + (duration % 1000000000);
     if (termTimeNano >= 1000000000) {
-        termTime++;
+        termTimeS++;
         termTimeNano -= 1000000000;
     }
 
-    printf("WORKER PID: %d PPID: %d SysClockS: %d SysClockNano: %d TermTimeS: %d TermTimeNano: %d\n",
-           getpid(), getppid(), startSeconds, startNano, termTime, termTimeNano);
-    printf("--Just Starting\n");
+    printf("WORKER PID: %d -- Just Starting\n", getpid());
 
-    int lastSecond = startSeconds;
     while (1) {
-        if (pcb->startSeconds > termTime || (pcb->startSeconds == termTime && pcb->startNano > termTimeNano)) {
-            printf("WORKER PID: %d PPID: %d SysClockS: %d SysClockNano: %d TermTimeS: %d TermTimeNano: %d\n",
-                   getpid(), getppid(), pcb->startSeconds, pcb->startNano, termTime, termTimeNano);
-            printf("--Terminating\n");
+        if (sysClock->seconds > termTimeS || (sysClock->seconds == termTimeS && sysClock->nanoseconds > termTimeNano)) {
+            printf("WORKER PID: %d -- Terminating\n", getpid());
             break;
-        }
-
-        if (pcb->startSeconds > lastSecond) {
-            printf("WORKER PID: %d PPID: %d SysClockS: %d SysClockNano: %d TermTimeS: %d TermTimeNano: %d\n",
-                   getpid(), getppid(), pcb->startSeconds, pcb->startNano, termTime, termTimeNano);
-            printf("--%d seconds have passed since starting\n", pcb->startSeconds - startSeconds);
-            lastSecond = pcb->startSeconds;
         }
     }
 
-    shmdt(pcb);
+    shmdt(sysClock);
 }
+
 int main(int argc, char *argv[]) {
     if (argc != 3) {
         usage();

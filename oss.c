@@ -51,30 +51,23 @@
 
 
 
-struct PCB{
-    int occupied; // either true or false
-    pid_t pid; // process id of this child
-    int startSeconds; // time when it was forked
-    int startNano; //time when it was forked
+#define SHM_KEY 859047  // Fixed shared memory key
+
+// Define the shared memory structure for system clock
+struct SystemClock {
+    int seconds;
+    int nanoseconds;
 };
 
-
-
-
-void usage(){
+void usage() {
     fprintf(stderr, "Help: oss [-h] [-n proc] [-s simul] [-t timelimitForChildren] [-i intervalInMsToLaunchChildren]\n");
-    fprintf(stderr, " -n proc: Specifies the number of worker processes to be launched.\n");
-    fprintf(stderr, " -s simul: Defines the maximum number of worker processes that can run simultaneously.\n");
-    fprintf(stderr, " -t timelimitForChildren: Specifies the upper bound of time a worker process will run for.\n");
-    fprintf(stderr, " -i intervalInMsToLaunchChildren: Specifies how often a new child process is launched.\n");
     exit(1);
 }
 
-//This function is for the command line arguments
-void commandLine(int argc, char *argv[], int *n, int *s, int *t, int *i){
+void commandLine(int argc, char *argv[], int *n, int *s, int *t, int *i) {
     int c;
-    while((c = getopt(argc, argv, "hn:s:t:i:")) != -1){
-        switch(c){
+    while ((c = getopt(argc, argv, "hn:s:t:i:")) != -1) {
+        switch (c) {
             case 'h':
                 usage();
                 break;
@@ -96,62 +89,54 @@ void commandLine(int argc, char *argv[], int *n, int *s, int *t, int *i){
     }
 }
 
-int main(int argc, char, char *argv[]){
+int main(int argc, char *argv[]) {
     int n = 0, s = 0, t = 0, i = 0;
     commandLine(argc, argv, &n, &s, &t, &i);
     if (n == 0 || s == 0 || t == 0 || i == 0) {
         usage();
     }
+
     printf("n = %d, s = %d, t = %d, i = %d\n", n, s, t, i);
 
-    // Initialize the system clock
-    int shmid = shmget(IPC_PRIVATE, sizeof(struct PCB), IPC_CREAT | 0666);
-    if (shmid < 0) {
-        perror("shmget");
+    // Create shared memory for the system clock
+    int shmid = shmget(SHM_KEY, sizeof(struct SystemClock), IPC_CREAT | 0666);
+    if (shmid == -1) {
+        perror("shmget failed");
         exit(1);
     }
 
-    struct PCB *pcb;
-    pcb = (struct PCB *) shmat(shmid, NULL, 0);
-    if (pcb == (void *) -1) {
-        perror("shmat");
+    // Attach to shared memory
+    struct SystemClock *sysClock = (struct SystemClock *) shmat(shmid, NULL, 0);
+    if (sysClock == (void *) -1) {
+        perror("shmat failed");
         exit(1);
     }
 
-    pcb->occupied = 0;
-    pcb->startSeconds = 0;
-    pcb->startNano = 0;
+    // Initialize system clock
+    sysClock->seconds = 0;
+    sysClock->nanoseconds = 0;
 
-    // Initialize the process table
-    struct PCB *processTable[n];
-    for (int j = 0; j < n; j++) {
-        processTable[j] = (struct PCB *) malloc(sizeof(struct PCB));
-        processTable[j]->occupied = 0;
-    }
-
-    // Initialize the process counter
-    int active_processes = 0;
+    printf("Shared Memory Created: shmid = %d\n", shmid);
 
     // Fork worker processes
+    int active_processes = 0;
     for (int j = 0; j < n; j++) {
         if (active_processes < s) {
             pid_t pid = fork();
             if (pid < 0) {
-                perror("fork");
+                perror("fork failed");
                 exit(1);
             } else if (pid == 0) {
                 // Child process
-                char shmid_str[10], maxTime_str[10], duration_str[10];
+                char shmid_str[10], duration_str[10];
                 sprintf(shmid_str, "%d", shmid);
-                sprintf(maxTime_str, "%d", t);
-                sprintf(duration_str, "%d", i);
-                execl("./worker", "worker", shmid_str, maxTime_str, duration_str, (char *) NULL);
-                perror("execl");
+                sprintf(duration_str, "%d", t);  // Worker receives `t` (duration)
+
+                execl("./worker", "worker", shmid_str, duration_str, (char *) NULL);
+                perror("execl failed");
                 exit(1);
             } else {
                 // Parent process
-                processTable[j]->pid = pid;
-                processTable[j]->occupied = 1;
                 active_processes++;
             }
         }
@@ -159,14 +144,13 @@ int main(int argc, char, char *argv[]){
 
     // Wait for all child processes to terminate
     for (int j = 0; j < n; j++) {
-        if (processTable[j]->occupied) {
-            waitpid(processTable[j]->pid, NULL, 0);
-        }
+        wait(NULL);
     }
 
-    // Clean up shared memory
-    shmdt(pcb);
+    // Cleanup shared memory
+    shmdt(sysClock);
     shmctl(shmid, IPC_RMID, NULL);
+    printf("Shared Memory Removed: shmid = %d\n", shmid);
 
     return 0;
 }
